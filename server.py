@@ -1,70 +1,61 @@
-from flask import Flask, request, jsonify
-import dropbox
+from flask import Flask, request, jsonify, abort
 import os
+import subprocess
+from datetime import datetime
 
 app = Flask(__name__)
 
+# Config GitHub (à modifier avec tes infos)
+GITHUB_REPO = "git@github.com:pixo/spike.git"
+GIT_BRANCH = "main"
+BASE_DIR = "/app/repository"
+os.makedirs(BASE_DIR, exist_ok=True)
 
-# 🔥 Charger l'Access Token depuis cred.txt
-def load_access_token():
+# Token d'authentification pour sécuriser l'accès (exemple, à modifier)
+API_TOKEN = "ton_token_secret"
+
+@app.get("/check-git")
+def check_git():
     try:
-        with open("cred.txt", "r") as f:
-            return f.read().strip()
+        result = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True)
+        return {"message": result.stdout.strip()}
     except FileNotFoundError:
-        print("⚠️ ERREUR: cred.txt introuvable !")
-        return None
+        return {"error": "Git is not installed on the server."}
 
-
-ACCESS_TOKEN = load_access_token()
-if not ACCESS_TOKEN:
-    raise ValueError("❌ Aucun Access Token trouvé. Ajoutez votre token dans cred.txt.")
-
-dbx = dropbox.Dropbox(ACCESS_TOKEN)
-
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    """Reçoit un fichier via API et l'upload vers Dropbox."""
-    if 'file' not in request.files:
-        return jsonify({"error": "Aucun fichier trouvé"}), 400
-
-    file = request.files['file']
-    dropbox_path = f"/harmonia/{file.filename}"
-
-    dbx.files_upload(file.read(), dropbox_path, mode=dropbox.files.WriteMode("overwrite"))
-
-    return jsonify({"message": f"✅ Fichier {file.filename} uploadé avec succès sur Dropbox."})
-
-
-@app.route('/download', methods=['GET'])
-def download_file():
-    """Télécharge un fichier depuis Dropbox et le renvoie."""
-    file_name = request.args.get('filename')
-
-    if not file_name:
-        return jsonify({"error": "Nom du fichier requis"}), 400
-
-    dropbox_path = f"/harmonia/{file_name}"
-    local_path = f"./{file_name}"
-
-    dbx.files_download_to_file(local_path, dropbox_path)
-
-    return jsonify({"message": f"📥 Fichier {file_name} téléchargé avec succès."})
-
-
-@app.route('/list', methods=['GET'])
-def list_files():
-    """Liste les fichiers disponibles dans le dossier Dropbox."""
-    try:
-        files = dbx.files_list_folder("/harmonia").entries
-        file_names = [file.name for file in files]
-        return jsonify({"files": file_names})
-    except dropbox.exceptions.ApiError:
-        return jsonify({"error": "Impossible d'accéder au dossier."}), 500
-
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    return "Hello, Harmonia API is running!"
+    return "🚀 Harmonia Commit API is running!", 200
+
+@app.route("/commit", methods=["POST"])
+def commit_code():
+    # Vérification du token d'authentification
+    token = request.headers.get("Authorization")
+    if token != f"Bearer {API_TOKEN}":
+        abort(401, "Unauthorized")
+
+    data = request.get_json()
+    if not data or "filename" not in data or "content" not in data:
+        return jsonify({"error": "Requête invalide. Il faut 'filename' et 'content'."}), 400
+
+    filename = data["filename"]
+    content = data["content"]
+    file_path = os.path.join(BASE_DIR, filename)
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        commit_message = f"Update {filename} - {datetime.now().isoformat()}"
+        subprocess.run(["git", "-C", BASE_DIR, "add", filename], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", BASE_DIR, "commit", "-m", commit_message], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", BASE_DIR, "push", "origin", GIT_BRANCH], check=True, capture_output=True, text=True)
+
+        return jsonify({"message": f"{filename} enregistré et commité avec succès !"}), 200
+
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"Erreur Git: {e.stderr}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
