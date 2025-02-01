@@ -15,8 +15,16 @@ BASE_DIR = "/app/repository"
 # Assure-toi que le dossier existe
 os.makedirs(BASE_DIR, exist_ok=True)
 
-
 import subprocess
+import time
+import threading
+
+
+def keep_alive():
+    """Empêche la VM de s'éteindre en maintenant un processus actif."""
+    while True:
+        print("[KEEP-ALIVE] La machine est maintenue active...")
+        time.sleep(300)  # 5 minutes
 
 @app.get("/check-git")
 def check_git():
@@ -63,6 +71,7 @@ def commit_code():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+threading.Thread(target=keep_alive, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
