@@ -16,6 +16,17 @@ BASE_DIR = "/app/repository"
 os.makedirs(BASE_DIR, exist_ok=True)
 
 
+import subprocess
+
+@app.get("/check-git")
+def check_git():
+    try:
+        result = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True)
+        return {"message": result.stdout.strip()}
+    except FileNotFoundError:
+        return {"error": "Git is not installed on the server."}
+
+
 @app.route("/", methods=["GET"])
 def home():
     return "🚀 Harmonia Commit API is running!", 200
