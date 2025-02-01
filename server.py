@@ -62,6 +62,9 @@ def list_files():
     except dropbox.exceptions.ApiError:
         return jsonify({"error": "Impossible d'accéder au dossier."}), 500
 
+@app.route("/")
+def home():
+    return "Hello, Harmonia API is running!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

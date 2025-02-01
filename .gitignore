@@ -1,2 +1,8 @@
 cred.txt
-test.py
+test
+*.xml
+*.log
+*.idea
+
+
+
