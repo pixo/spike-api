@@ -1,78 +1,41 @@
 from flask import Flask, request, jsonify
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 import os
-import subprocess
-from datetime import datetime
+from googleapiclient.http import MediaIoBaseUpload
+import io
 
 app = Flask(__name__)
 
-# Config GitHub (à modifier avec tes infos)
-GITHUB_REPO = "git@github.com:pixo/spike.git"  # ⚠️ Vérifie l'URL SSH si besoin
-GIT_BRANCH = "main"  # Branche où pousser les commits
+# Charger les credentials
+CREDENTIALS_FILE = "spike_anarchiste.json"
+creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=["https://www.googleapis.com/auth/drive"])
 
-# Dossier où seront enregistrés les fichiers
-BASE_DIR = "/app/repository"
+# Initialisation du client Google Drive
+service = build('drive', 'v3', credentials=creds)
 
-# Assure-toi que le dossier existe
-os.makedirs(BASE_DIR, exist_ok=True)
+@app.route('/list_files', methods=['GET'])
+def list_files():
+    """Liste les fichiers du Google Drive"""
+    results = service.files().list().execute()
+    files = results.get('files', [])
+    return jsonify(files)
 
-import subprocess
-import time
-import threading
+@app.route('/upload_file', methods=['POST'])
+def upload_file():
+    """Upload un fichier sur Google Drive"""
+    file = request.files['file']
+    file_metadata = {'name': file.filename}
+    media = MediaIoBaseUpload(file, mimetype=file.content_type)
+    uploaded_file = service.files().create(body=file_metadata, media_body=media).execute()
+    return jsonify({"fileId": uploaded_file.get("id")})
 
+@app.route('/download_file', methods=['GET'])
+def download_file():
+    """Télécharge un fichier depuis Google Drive"""
+    file_id = request.args.get('file_id')
+    request_drive = service.files().get_media(fileId=file_id)
+    return request_drive.execute()
 
-def keep_alive():
-    """Empêche la VM de s'éteindre en maintenant un processus actif."""
-    while True:
-        print("[KEEP-ALIVE] La machine est maintenue active...")
-        time.sleep(300)  # 5 minutes
-
-@app.get("/check-git")
-def check_git():
-    try:
-        result = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True)
-        return {"message": result.stdout.strip()}
-    except FileNotFoundError:
-        return {"error": "Git is not installed on the server."}
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return "🚀 Harmonia Commit API is running!", 200
-
-
-@app.route("/commit", methods=["POST"])
-def commit_code():
-    """
-    Reçoit du code via POST, l'enregistre et fait un commit + push.
-    """
-    data = request.get_json()
-
-    if not data or "filename" not in data or "content" not in data:
-        return jsonify({"error": "Requête invalide. Il faut 'filename' et 'content'."}), 400
-
-    filename = data["filename"]
-    content = data["content"]
-
-    file_path = os.path.join(BASE_DIR, filename)
-
-    try:
-        # 🔹 Écriture du fichier
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        # 🔹 Commit + Push
-        commit_message = f"Update {filename} - {datetime.now().isoformat()}"
-        subprocess.run(["git", "-C", BASE_DIR, "add", filename], check=True)
-        subprocess.run(["git", "-C", BASE_DIR, "commit", "-m", commit_message], check=True)
-        subprocess.run(["git", "-C", BASE_DIR, "push", "origin", GIT_BRANCH], check=True)
-
-        return jsonify({"message": f"{filename} enregistré et commité avec succès !"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# threading.Thread(target=keep_alive, daemon=True).start()
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080)
