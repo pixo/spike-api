@@ -1,41 +1,67 @@
 from flask import Flask, request, jsonify
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
+import dropbox
 import os
-from googleapiclient.http import MediaIoBaseUpload
-import io
 
 app = Flask(__name__)
 
-# Charger les credentials
-CREDENTIALS_FILE = "spike_anarchiste.json"
-creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=["https://www.googleapis.com/auth/drive"])
 
-# Initialisation du client Google Drive
-service = build('drive', 'v3', credentials=creds)
+# 🔥 Charger l'Access Token depuis cred.txt
+def load_access_token():
+    try:
+        with open("cred.txt", "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        print("⚠️ ERREUR: cred.txt introuvable !")
+        return None
 
-@app.route('/list_files', methods=['GET'])
-def list_files():
-    """Liste les fichiers du Google Drive"""
-    results = service.files().list().execute()
-    files = results.get('files', [])
-    return jsonify(files)
 
-@app.route('/upload_file', methods=['POST'])
+ACCESS_TOKEN = load_access_token()
+if not ACCESS_TOKEN:
+    raise ValueError("❌ Aucun Access Token trouvé. Ajoutez votre token dans cred.txt.")
+
+dbx = dropbox.Dropbox(ACCESS_TOKEN)
+
+
+@app.route('/upload', methods=['POST'])
 def upload_file():
-    """Upload un fichier sur Google Drive"""
+    """Reçoit un fichier via API et l'upload vers Dropbox."""
+    if 'file' not in request.files:
+        return jsonify({"error": "Aucun fichier trouvé"}), 400
+
     file = request.files['file']
-    file_metadata = {'name': file.filename}
-    media = MediaIoBaseUpload(file, mimetype=file.content_type)
-    uploaded_file = service.files().create(body=file_metadata, media_body=media).execute()
-    return jsonify({"fileId": uploaded_file.get("id")})
+    dropbox_path = f"/harmonia/{file.filename}"
 
-@app.route('/download_file', methods=['GET'])
+    dbx.files_upload(file.read(), dropbox_path, mode=dropbox.files.WriteMode("overwrite"))
+
+    return jsonify({"message": f"✅ Fichier {file.filename} uploadé avec succès sur Dropbox."})
+
+
+@app.route('/download', methods=['GET'])
 def download_file():
-    """Télécharge un fichier depuis Google Drive"""
-    file_id = request.args.get('file_id')
-    request_drive = service.files().get_media(fileId=file_id)
-    return request_drive.execute()
+    """Télécharge un fichier depuis Dropbox et le renvoie."""
+    file_name = request.args.get('filename')
 
-if __name__ == '__main__':
+    if not file_name:
+        return jsonify({"error": "Nom du fichier requis"}), 400
+
+    dropbox_path = f"/harmonia/{file_name}"
+    local_path = f"./{file_name}"
+
+    dbx.files_download_to_file(local_path, dropbox_path)
+
+    return jsonify({"message": f"📥 Fichier {file_name} téléchargé avec succès."})
+
+
+@app.route('/list', methods=['GET'])
+def list_files():
+    """Liste les fichiers disponibles dans le dossier Dropbox."""
+    try:
+        files = dbx.files_list_folder("/harmonia").entries
+        file_names = [file.name for file in files]
+        return jsonify({"files": file_names})
+    except dropbox.exceptions.ApiError:
+        return jsonify({"error": "Impossible d'accéder au dossier."}), 500
+
+
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
