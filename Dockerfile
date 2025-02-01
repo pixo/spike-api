@@ -15,3 +15,5 @@ EXPOSE 8080
 
 # Commande pour démarrer le serveur Flask
 CMD ["python", "server.py"]
+
+RUN apt-get update && apt-get install -y git
